@@ -1,7 +1,9 @@
 // geom.h — procedural modelling toolkit: rounded boxes, lathes, tubes, quads and an SDF mesher (surface nets)
 #pragma once
 #include "base.h"
+#ifndef _WIN32
 #include <dispatch/dispatch.h>
+#endif
 
 // flat quad a,b,c,d (counter-clockwise seen from the side the normal points to)
 static inline void quad(Mesh& m, V3 a, V3 b, V3 c, V3 d) {
@@ -141,9 +143,17 @@ static inline void sdfMesh(Mesh& dst, const M34& xf, const std::function<float(V
   int nx = (int)ceilf((hi.x - lo.x) / cell), ny = (int)ceilf((hi.y - lo.y) / cell), nz = (int)ceilf((hi.z - lo.z) / cell);
   size_t sx = nx + 1, sy = ny + 1, sz = nz + 1;
   std::vector<float> val(sx * sy * sz); float* vp = val.data(); const std::function<float(V3)>* fp = &f;
+#ifdef _WIN32
+  // Windows: GCD/blocks yok, ayni dongu OpenMP ile paralel
+  #pragma omp parallel for schedule(dynamic)
+  for (int kk = 0; kk < (int)sz; kk++) { size_t k = (size_t)kk;
+    for (size_t j = 0; j < sy; j++) for (size_t i = 0; i < sx; i++) vp[(k * sy + j) * sx + i] = (*fp)(V3(lo.x + i * cell, lo.y + j * cell, lo.z + k * cell));
+  }
+#else
   dispatch_apply(sz, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t k) {
     for (size_t j = 0; j < sy; j++) for (size_t i = 0; i < sx; i++) vp[(k * sy + j) * sx + i] = (*fp)(V3(lo.x + i * cell, lo.y + j * cell, lo.z + k * cell));
   });
+#endif
   auto V = [&](int i, int j, int k) { return val[((size_t)k * sy + j) * sx + i]; };
   std::vector<int> vid((size_t)nx * ny * nz, -1);
   auto C = [&](int i, int j, int k) -> int& { return vid[((size_t)k * ny + j) * nx + i]; };
